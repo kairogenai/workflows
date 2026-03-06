@@ -1,0 +1,91 @@
+name: Update All Containers in Cluster
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        description: 'Image repository URI (without tag)'
+        required: true
+        type: string
+      image_tag:
+        description: 'New image tag'
+        required: true
+        type: string
+      cluster:
+        description: 'ECS cluster name'
+        required: true
+        type: string
+      aws_region:
+        description: 'AWS region'
+        required: false
+        type: string
+        default: 'us-east-1'
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+jobs:
+  update-containers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Update Services in Cluster
+        id: update-services
+        shell: bash
+        run: |
+          REPOSITORY="${{ inputs.repository }}"
+          IMAGE_TAG="${{ inputs.image_tag }}"
+          CLUSTER="${{ inputs.cluster }}"
+          
+          echo "Listing services in cluster $CLUSTER..."
+          services=$(aws ecs list-services --cluster "$CLUSTER" --query 'serviceArns[]' --output text)
+          
+          if [ -z "$services" ]; then
+            echo "No services found in cluster $CLUSTER."
+            exit 0
+          fi
+          
+          for service_arn in $services; do
+            service_name=$(basename "$service_arn")
+            echo "Checking service: $service_name"
+            
+            # Get current task definition ARN
+            task_def_arn=$(aws ecs describe-services --cluster "$CLUSTER" --services "$service_name" --query 'services[0].taskDefinition' --output text)
+            
+            # Get task definition details
+            task_def_json=$(aws ecs describe-task-definition --task-definition "$task_def_arn" --query 'taskDefinition')
+            
+            # Check if any container uses the repository
+            if echo "$task_def_json" | jq -e ".containerDefinitions[] | select(.image | startswith(\"$REPOSITORY:\"))" > /dev/null; then
+              echo "  -> Found matching image! Updating service..."
+              
+              # Prepare new task definition
+              new_task_def=$(echo "$task_def_json" | jq "
+                del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
+                .containerDefinitions |= map(
+                  if .image | startswith(\"$REPOSITORY:\") then
+                    .image = \"$REPOSITORY:$IMAGE_TAG\"
+                  else
+                    .
+                  end
+                )
+              ")
+              
+              # Register new task definition
+              new_task_def_arn=$(aws ecs register-task-definition --cli-input-json "$new_task_def" --query 'taskDefinition.taskDefinitionArn' --output text)
+              
+              # Update service
+              aws ecs update-service --cluster "$CLUSTER" --service "$service_name" --task-definition "$new_task_def_arn"
+              echo "  -> Service $service_name updated to task definition $new_task_def_arn"
+            else
+              echo "  -> Repository $REPOSITORY not found in this service. Skipping."
+            fi
+          done
