@@ -44,30 +44,25 @@ jobs:
           REPOSITORY="${{ inputs.repository }}"
           IMAGE_TAG="${{ inputs.image_tag }}"
           CLUSTER="${{ inputs.cluster }}"
-          
+
           echo "Listing services in cluster $CLUSTER..."
           services=$(aws ecs list-services --cluster "$CLUSTER" --query 'serviceArns[]' --output text)
-          
+
           if [ -z "$services" ]; then
             echo "No services found in cluster $CLUSTER."
             exit 0
           fi
-          
+
           for service_arn in $services; do
             service_name=$(basename "$service_arn")
             echo "Checking service: $service_name"
-            
-            # Get current task definition ARN
+
             task_def_arn=$(aws ecs describe-services --cluster "$CLUSTER" --services "$service_name" --query 'services[0].taskDefinition' --output text)
-            
-            # Get task definition details
             task_def_json=$(aws ecs describe-task-definition --task-definition "$task_def_arn" --query 'taskDefinition')
-            
-            # Check if any container uses the repository
+
             if echo "$task_def_json" | jq -e ".containerDefinitions[] | select(.image | startswith(\"$REPOSITORY:\"))" > /dev/null; then
-              echo "  -> Found matching image! Updating service..."
-              
-              # Prepare new task definition
+              echo "  -> Found matching image in $service_name. Registering new task definition..."
+
               new_task_def=$(echo "$task_def_json" | jq "
                 del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
                 .containerDefinitions |= map(
@@ -78,14 +73,30 @@ jobs:
                   end
                 )
               ")
-              
-              # Register new task definition
+
               new_task_def_arn=$(aws ecs register-task-definition --cli-input-json "$new_task_def" --query 'taskDefinition.taskDefinitionArn' --output text)
-              
-              # Update service
-              aws ecs update-service --cluster "$CLUSTER" --service "$service_name" --task-definition "$new_task_def_arn"
-              echo "  -> Service $service_name updated to task definition $new_task_def_arn"
+              echo "  -> New task definition: $new_task_def_arn"
+
+              aws ecs update-service \
+                --cluster "$CLUSTER" \
+                --service "$service_name" \
+                --task-definition "$new_task_def_arn" \
+                --query 'service.serviceName' \
+                --output text
+
+              echo "  -> Waiting for $service_name to stabilize (up to 10 min)..."
+              if aws ecs wait services-stable \
+                --cluster "$CLUSTER" \
+                --services "$service_name"; then
+                echo "  -> ✅ $service_name is stable with $IMAGE_TAG"
+              else
+                echo "  -> ❌ $service_name failed to stabilize — rolling back may be in progress"
+                exit 1
+              fi
             else
-              echo "  -> Repository $REPOSITORY not found in this service. Skipping."
+              echo "  -> Repository $REPOSITORY not found in $service_name. Skipping."
             fi
           done
+
+          echo ""
+          echo "✅ All services updated to $IMAGE_TAG"
