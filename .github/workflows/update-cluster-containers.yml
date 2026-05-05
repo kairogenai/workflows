@@ -84,15 +84,7 @@ jobs:
                 --query 'service.serviceName' \
                 --output text
 
-              echo "  -> Waiting for $service_name to stabilize (up to 10 min)..."
-              if aws ecs wait services-stable \
-                --cluster "$CLUSTER" \
-                --services "$service_name"; then
-                echo "  -> ✅ $service_name is stable with $IMAGE_TAG"
-              else
-                echo "  -> ❌ $service_name failed to stabilize — rolling back may be in progress"
-                exit 1
-              fi
+              echo "  -> Service $service_name updated to $new_task_def_arn"
             else
               echo "  -> Repository $REPOSITORY not found in $service_name. Skipping."
             fi

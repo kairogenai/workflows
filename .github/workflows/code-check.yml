@@ -8,8 +8,13 @@ on:
         required: false
         type: string
         default: '22'
+      package-manager:
+        description: 'Package manager to use (pnpm or npm)'
+        required: false
+        type: string
+        default: 'pnpm'
       pnpm-version:
-        description: 'pnpm version'
+        description: 'pnpm version (only used when package-manager is pnpm)'
         required: false
         type: number
         default: 9
@@ -36,25 +41,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup pnpm
+        if: ${{ inputs.package-manager == 'pnpm' }}
         uses: pnpm/action-setup@v4
         with:
           version: ${{ inputs.pnpm-version }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'pnpm'
+          cache: ${{ inputs.package-manager }}
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          if [ "${{ inputs.package-manager }}" = "npm" ]; then
+            npm ci
+          else
+            pnpm install --frozen-lockfile
+          fi
 
       - name: Run lint
-        run: pnpm lint
+        run: |
+          if [ "${{ inputs.package-manager }}" = "npm" ]; then
+            npm run lint
+          else
+            pnpm run lint
+          fi
 
   test:
     name: Test
@@ -62,25 +76,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup pnpm
+        if: ${{ inputs.package-manager == 'pnpm' }}
         uses: pnpm/action-setup@v4
         with:
           version: ${{ inputs.pnpm-version }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'pnpm'
+          cache: ${{ inputs.package-manager }}
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          if [ "${{ inputs.package-manager }}" = "npm" ]; then
+            npm ci
+          else
+            pnpm install --frozen-lockfile
+          fi
 
       - name: Run tests
-        run: pnpm test
+        run: |
+          if [ "${{ inputs.package-manager }}" = "npm" ]; then
+            npm test
+          else
+            pnpm run test
+          fi
 
   build:
     name: Build
@@ -88,22 +111,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup pnpm
+        if: ${{ inputs.package-manager == 'pnpm' }}
         uses: pnpm/action-setup@v4
         with:
           version: ${{ inputs.pnpm-version }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'pnpm'
+          cache: ${{ inputs.package-manager }}
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          if [ "${{ inputs.package-manager }}" = "npm" ]; then
+            npm ci
+          else
+            pnpm install --frozen-lockfile
+          fi
 
       - name: Build
-        run: pnpm build
+        run: |
+          if [ "${{ inputs.package-manager }}" = "npm" ]; then
+            npm run build
+          else
+            pnpm run build
+          fi
