@@ -13,6 +13,10 @@ on:
         required: false
         type: string
         default: 'production'
+      build_args:
+        required: false
+        type: string
+        default: ''
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -38,7 +42,13 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t ${{ inputs.repository }}:${{ inputs.image_tag }} .
+          BUILD_ARGS=""
+          if [ -n "${{ inputs.build_args }}" ]; then
+            while IFS= read -r arg; do
+              [ -n "$arg" ] && BUILD_ARGS="$BUILD_ARGS --build-arg $arg"
+            done <<< "${{ inputs.build_args }}"
+          fi
+          docker build $BUILD_ARGS -t ${{ inputs.repository }}:${{ inputs.image_tag }} .
 
       - name: Push Docker image
         run: |
